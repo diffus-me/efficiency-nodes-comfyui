@@ -11,6 +11,7 @@ import comfy.sd
 import comfy.controlnet
 import comfy.model_management
 import comfy.sample
+import execution_context
 from . import bnk_tiling as tiling
 import latent_preview
 #import torch
@@ -101,7 +102,7 @@ def slices_T2I(h, h_len, w, w_len, model:comfy.controlnet.ControlBase, img):
 
 from PIL import Image
 
-def sample_common(model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, preview=False):
+def sample_common(model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, preview=False, context: execution_context.ExecutionContext=None):
     end_at_step = min(end_at_step, steps)
     device = get_device()
     samples = latent_image["samples"]
@@ -208,7 +209,7 @@ def sample_common(model, add_noise, noise_seed, tile_width, tile_height, tiling_
         preview_format = "JPEG"
     previewer = None
     if preview:
-        previewer = latent_preview.get_previewer(device, model.model.latent_format)
+        previewer = latent_preview.get_previewer(context, device, model.model.latent_format)
     
     
     with tqdm(total=total_steps) as pbar_tqdm:
@@ -316,16 +317,18 @@ class TiledKSampler:
                     "negative": ("CONDITIONING", ),
                     "latent_image": ("LATENT", ),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                    }}
+                    },
+                "hidden": {"context": "EXECUTION_CONTEXT"}
+                }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "sample"
 
     CATEGORY = "sampling"
 
-    def sample(self, model, seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise):
+    def sample(self, model, seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, context: execution_context.ExecutionContext):
         steps_total = int(steps / denoise)
-        return sample_common(model, 'enable', seed, tile_width, tile_height, tiling_strategy, steps_total, cfg, sampler_name, scheduler, positive, negative, latent_image, steps_total-steps, steps_total, 'disable', denoise=1.0, preview=True)
+        return sample_common(model, 'enable', seed, tile_width, tile_height, tiling_strategy, steps_total, cfg, sampler_name, scheduler, positive, negative, latent_image, steps_total-steps, steps_total, 'disable', denoise=1.0, preview=True, context=context)
 
 class TiledKSamplerAdvanced:
     @classmethod
@@ -348,12 +351,14 @@ class TiledKSamplerAdvanced:
                     "end_at_step": ("INT", {"default": 10000, "min": 0, "max": 10000}),
                     "return_with_leftover_noise": (["disable", "enable"], ),
                     "preview": (["disable", "enable"], ),
-                    }}
+                    },
+                "hidden": {"context": "EXECUTION_CONTEXT"}
+                }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "sample"
 
     CATEGORY = "sampling"
 
-    def sample(self, model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, preview, denoise=1.0):
-        return sample_common(model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, preview= preview == 'enable')
+    def sample(self, model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, preview, denoise=1.0, context: execution_context.ExecutionContext=None):
+        return sample_common(model, add_noise, noise_seed, tile_width, tile_height, tiling_strategy, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, preview= preview == 'enable', context=context)
