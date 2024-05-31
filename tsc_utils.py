@@ -8,6 +8,8 @@ import sys
 import io
 from contextlib import contextmanager
 import json
+
+import execution_context
 import folder_paths
 
 # Get the absolute path of the parent directory of the current script
@@ -216,7 +218,7 @@ def globals_cleanup(prompt):
                     loaded_objects[key].remove(tup)
                     ###print(f'Deleted tuple at index {i} in {key} in loaded_objects because its id array became empty.')
 
-def load_checkpoint(ckpt_name, id, output_vae=True, cache=None, cache_overwrite=True, ckpt_type="ckpt"):
+def load_checkpoint(context: execution_context.ExecutionContext, ckpt_name, id, output_vae=True, cache=None, cache_overwrite=True, ckpt_type="ckpt"):
     global loaded_objects
 
     # Create copies of the arguments right at the start
@@ -241,7 +243,7 @@ def load_checkpoint(ckpt_name, id, output_vae=True, cache=None, cache_overwrite=
     if os.path.isabs(ckpt_name):
         ckpt_path = ckpt_name
     else:
-        ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+        ckpt_path = folder_paths.get_full_path(context, "checkpoints", ckpt_name)
     with suppress_output():
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
 
@@ -273,7 +275,7 @@ def get_bvae_by_ckpt_name(ckpt_name):
             return ckpt[3]  # return 'bvae' variable
     return None  # return None if no match is found
 
-def load_vae(vae_name, id, cache=None, cache_overwrite=False):
+def load_vae(context, vae_name, id, cache=None, cache_overwrite=False):
     global loaded_objects
 
     # Create copies of the argument right at the start
@@ -293,7 +295,7 @@ def load_vae(vae_name, id, cache=None, cache_overwrite=False):
     if os.path.isabs(vae_name):
         vae_path = vae_name
     else:
-        vae_path = folder_paths.get_full_path("vae", vae_name)
+        vae_path = folder_paths.get_full_path(context, "vae", vae_name)
 
     sd = comfy.utils.load_torch_file(vae_path)
     vae = comfy.sd.VAE(sd=sd)
@@ -316,7 +318,7 @@ def load_vae(vae_name, id, cache=None, cache_overwrite=False):
 
     return vae
 
-def load_lora(lora_params, ckpt_name, id, cache=None, ckpt_cache=None, cache_overwrite=False):
+def load_lora(context, lora_params, ckpt_name, id, cache=None, ckpt_cache=None, cache_overwrite=False):
     global loaded_objects
 
     # Create copies of the arguments right at the start
@@ -350,7 +352,7 @@ def load_lora(lora_params, ckpt_name, id, cache=None, ckpt_cache=None, cache_ove
 
             return lora_model, lora_clip
 
-    def recursive_load_lora(lora_params, ckpt, clip, id, ckpt_cache, cache_overwrite, folder_paths):
+    def recursive_load_lora(lora_params, ckpt, clip, id, ckpt_cache, cache_overwrite):
         if len(lora_params) == 0:
             return ckpt, clip
 
@@ -358,18 +360,18 @@ def load_lora(lora_params, ckpt_name, id, cache=None, ckpt_cache=None, cache_ove
         if os.path.isabs(lora_name):
             lora_path = lora_name
         else:
-            lora_path = folder_paths.get_full_path("loras", lora_name)
+            lora_path = folder_paths.get_full_path(context, "loras", lora_name)
 
         lora_model, lora_clip = comfy.sd.load_lora_for_models(ckpt, clip, comfy.utils.load_torch_file(lora_path), strength_model, strength_clip)
 
         # Call the function again with the new lora_model and lora_clip and the remaining tuples
-        return recursive_load_lora(lora_params[1:], lora_model, lora_clip, id, ckpt_cache, cache_overwrite, folder_paths)
+        return recursive_load_lora(lora_params[1:], lora_model, lora_clip, id, ckpt_cache, cache_overwrite)
 
     # Unpack lora parameters from the first element of the list for now
     lora_name, strength_model, strength_clip = lora_params[0]
-    ckpt, clip, _ = load_checkpoint(ckpt_name, id, cache=ckpt_cache)
+    ckpt, clip, _ = load_checkpoint(context, ckpt_name, id, cache=ckpt_cache)
 
-    lora_model, lora_clip = recursive_load_lora(lora_params, ckpt, clip, id, ckpt_cache, cache_overwrite, folder_paths)
+    lora_model, lora_clip = recursive_load_lora(lora_params, ckpt, clip, id, ckpt_cache, cache_overwrite)
 
     if cache:
         if len([entry for entry in loaded_objects["lora"] if id in entry[-1]]) < cache:
