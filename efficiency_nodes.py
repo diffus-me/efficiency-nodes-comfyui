@@ -18,6 +18,8 @@ import subprocess
 import json
 import psutil
 
+import execution_context
+
 # Get the absolute path of various directories
 my_dir = os.path.dirname(os.path.abspath(__file__))
 custom_nodes_dir = os.path.abspath(os.path.join(my_dir, '..'))
@@ -96,11 +98,11 @@ def encode_prompts(positive_prompt, negative_prompt, token_normalization, weight
 class TSC_EfficientLoader:
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": { "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
-                              "vae_name": (["Baked VAE"] + folder_paths.get_filename_list("vae"),),
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        return {"required": { "ckpt_name": (folder_paths.get_filename_list(context, "checkpoints"),),
+                              "vae_name": (["Baked VAE"] + folder_paths.get_filename_list(context, "vae"),),
                               "clip_skip": ("INT", {"default": -1, "min": -24, "max": -1, "step": 1}),
-                              "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
+                              "lora_name": (["None"] + folder_paths.get_filename_list(context, "loras"),),
                               "lora_model_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
                               "lora_clip_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
                               "positive": ("STRING", {"default": "CLIP_POSITIVE","multiline": True}),
@@ -113,7 +115,8 @@ class TSC_EfficientLoader:
                 "optional": {"lora_stack": ("LORA_STACK", ),
                              "cnet_stack": ("CONTROL_NET_STACK",)},
                 "hidden": { "prompt": "PROMPT",
-                            "my_unique_id": "UNIQUE_ID",},
+                            "my_unique_id": "UNIQUE_ID",
+                            "context": "EXECUTION_CONTEXT",},
                 }
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "LATENT", "VAE", "CLIP", "DEPENDENCIES",)
@@ -124,7 +127,8 @@ class TSC_EfficientLoader:
     def efficientloader(self, ckpt_name, vae_name, clip_skip, lora_name, lora_model_strength, lora_clip_strength,
                         positive, negative, token_normalization, weight_interpretation, empty_latent_width,
                         empty_latent_height, batch_size, lora_stack=None, cnet_stack=None, refiner_name="None",
-                        ascore=None, prompt=None, my_unique_id=None, loader_type="regular"):
+                        ascore=None, prompt=None, my_unique_id=None, loader_type="regular",
+                        context: execution_context.ExecutionContext = None):
 
         # Clean globally stored objects
         globals_cleanup(prompt)
@@ -148,17 +152,17 @@ class TSC_EfficientLoader:
                 lora_params.extend(lora_stack)
 
             # Load LoRa(s)
-            model, clip = load_lora(lora_params, ckpt_name, my_unique_id, cache=lora_cache, ckpt_cache=ckpt_cache, cache_overwrite=True)
+            model, clip = load_lora(context, lora_params, ckpt_name, my_unique_id, cache=lora_cache, ckpt_cache=ckpt_cache, cache_overwrite=True)
 
             if vae_name == "Baked VAE":
                 vae = get_bvae_by_ckpt_name(ckpt_name)
         else:
-            model, clip, vae = load_checkpoint(ckpt_name, my_unique_id, cache=ckpt_cache, cache_overwrite=True)
+            model, clip, vae = load_checkpoint(context, ckpt_name, my_unique_id, cache=ckpt_cache, cache_overwrite=True)
             lora_params = None
 
         # Load Refiner Checkpoint if given
         if refiner_name != "None":
-            refiner_model, refiner_clip, _ = load_checkpoint(refiner_name, my_unique_id, output_vae=False,
+            refiner_model, refiner_clip, _ = load_checkpoint(context, refiner_name, my_unique_id, output_vae=False,
                                                              cache=refn_cache, cache_overwrite=True, ckpt_type="refn")
         else:
             refiner_model = refiner_clip = None
@@ -180,7 +184,7 @@ class TSC_EfficientLoader:
 
         # Check for custom VAE
         if vae_name != "Baked VAE":
-            vae = load_vae(vae_name, my_unique_id, cache=vae_cache, cache_overwrite=True)
+            vae = load_vae(context, vae_name, my_unique_id, cache=vae_cache, cache_overwrite=True)
 
         # Data for XY Plot
         dependencies = (vae_name, ckpt_name, clip, clip_skip, refiner_name, refiner_clip, refiner_clip_skip,
@@ -202,14 +206,14 @@ class TSC_EfficientLoader:
 class TSC_EfficientLoaderSDXL(TSC_EfficientLoader):
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": { "base_ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        return {"required": { "base_ckpt_name": (folder_paths.get_filename_list(context, "checkpoints"),),
                               "base_clip_skip": ("INT", {"default": -2, "min": -24, "max": -1, "step": 1}),
-                              "refiner_ckpt_name": (["None"] + folder_paths.get_filename_list("checkpoints"),),
+                              "refiner_ckpt_name": (["None"] + folder_paths.get_filename_list(context, "checkpoints"),),
                               "refiner_clip_skip": ("INT", {"default": -2, "min": -24, "max": -1, "step": 1}),
                               "positive_ascore": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
                               "negative_ascore": ("FLOAT", {"default": 2.0, "min": 0.0, "max": 1000.0, "step": 0.01}),
-                              "vae_name": (["Baked VAE"] + folder_paths.get_filename_list("vae"),),
+                              "vae_name": (["Baked VAE"] + folder_paths.get_filename_list(context, "vae"),),
                               "positive": ("STRING", {"default": "CLIP_POSITIVE", "multiline": True}),
                               "negative": ("STRING", {"default": "CLIP_NEGATIVE", "multiline": True}),
                               "token_normalization": (["none", "mean", "length", "length+mean"],),
@@ -287,8 +291,8 @@ class TSC_LoRA_Stacker:
     modes = ["simple", "advanced"]
 
     @classmethod
-    def INPUT_TYPES(cls):
-        loras = ["None"] + folder_paths.get_filename_list("loras")
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        loras = ["None"] + folder_paths.get_filename_list(context, "loras")
         inputs = {
             "required": {
                 "input_mode": (cls.modes,),
@@ -394,7 +398,7 @@ class TSC_Apply_ControlNet_Stack:
 ########################################################################################################################
 # TSC KSampler (Efficient)
 class TSC_KSampler:
-    
+
     empty_image = pil2tensor(Image.new('RGBA', (1, 1), (0, 0, 0, 0)))
 
     @classmethod
@@ -415,7 +419,7 @@ class TSC_KSampler:
                      },
                 "optional": { "optional_vae": ("VAE",),
                               "script": ("SCRIPT",),},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID",},
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID", "context": "EXECUTION_CONTEXT"},
                 }
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "LATENT", "VAE", "IMAGE", )
@@ -426,6 +430,7 @@ class TSC_KSampler:
 
     def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                preview_method, vae_decode, denoise=1.0, prompt=None, extra_pnginfo=None, my_unique_id=None,
+               context: execution_context.ExecutionContext = None,
                optional_vae=(None,), script=None, add_noise=None, start_at_step=None, end_at_step=None,
                return_with_leftover_noise=None, sampler_type="regular"):
 
@@ -593,7 +598,7 @@ class TSC_KSampler:
                             cnet_imgs = AIO_Preprocessor().execute(preprocessor, images)[0]
                             store_ksampler_results("cnet_img", my_unique_id, cnet_imgs, [preprocessor])
                         positive = ControlNetApply().apply_controlnet(positive, hires_control_net, cnet_imgs, hires_cnet_strength)[0]
-                        
+
                     # Iterate for the given number of iterations
                     if upscale_type == "latent":
                         for _ in range(iterations):
@@ -719,7 +724,7 @@ class TSC_KSampler:
                 result = (sdxl_tuple, samples, vae, images,)
             else:
                 result = (model, positive, negative, samples, vae, images,)
-                
+
             if preview is None:
                 return {"result": result}
             else:
@@ -1356,29 +1361,29 @@ class TSC_KSampler:
                 # Load Checkpoint if required. If Y_type is LoRA, required models will be loaded by load_lora func.
                 if (X_type == "Checkpoint" and index == 0 and Y_type != "LoRA"):
                     if lora_stack is None:
-                        model, clip, _ = load_checkpoint(ckpt_name, xyplot_id, cache=cache[1])
+                        model, clip, _ = load_checkpoint(context, ckpt_name, xyplot_id, cache=cache[1])
                     else: # Load Efficient Loader LoRA
-                        model, clip = load_lora(lora_stack, ckpt_name, xyplot_id,
+                        model, clip = load_lora(context, lora_stack, ckpt_name, xyplot_id,
                                                 cache=None, ckpt_cache=cache[1])
                     encode = True
 
                 # Load LoRA if required
                 elif (X_type == "LoRA" and index == 0):
                     # Don't cache Checkpoints
-                    model, clip = load_lora(lora_stack, ckpt_name, xyplot_id, cache=cache[2])
+                    model, clip = load_lora(context, lora_stack, ckpt_name, xyplot_id, cache=cache[2])
                     encode = True
                 elif Y_type == "LoRA":  # X_type must be Checkpoint, so cache those as defined
-                    model, clip = load_lora(lora_stack, ckpt_name, xyplot_id,
+                    model, clip = load_lora(context, lora_stack, ckpt_name, xyplot_id,
                                             cache=None, ckpt_cache=cache[1])
                     encode = True
                 elif X_type == "LoRA Batch" or X_type == "LoRA Wt" or X_type == "LoRA MStr" or X_type == "LoRA CStr":
                     # Don't cache Checkpoints or LoRAs
-                    model, clip = load_lora(lora_stack, ckpt_name, xyplot_id, cache=0)
+                    model, clip = load_lora(context, lora_stack, ckpt_name, xyplot_id, cache=0)
                     encode = True
 
                 if (X_type == "Refiner" and index == 0) or Y_type == "Refiner":
                     refiner_model, refiner_clip, _ = \
-                        load_checkpoint(refiner_name, xyplot_id, output_vae=False, cache=cache[3], ckpt_type="refn")
+                        load_checkpoint(context, refiner_name, xyplot_id, output_vae=False, cache=cache[3], ckpt_type="refn")
                     encode_refiner = True
 
                 # Encode base prompt if required
@@ -1414,10 +1419,10 @@ class TSC_KSampler:
                 if (X_type == "VAE" and index == 0) or Y_type == "VAE":
                     #vae = load_vae(vae_name, xyplot_id, cache=cache[0])
                     vae = get_bvae_by_ckpt_name(ckpt_name) if vae_name == "Baked VAE" \
-                        else load_vae(vae_name, xyplot_id, cache=cache[0])
+                        else load_vae(context, vae_name, xyplot_id, cache=cache[0])
                 elif X_type == "Checkpoint" and index == 0 and vae_name:
                     vae = get_bvae_by_ckpt_name(ckpt_name) if vae_name == "Baked VAE" \
-                        else load_vae(vae_name, xyplot_id, cache=cache[0])
+                        else load_vae(context, vae_name, xyplot_id, cache=cache[0])
 
                 return model, positive, negative, refiner_model, refiner_positive, refiner_negative, vae
 
@@ -2401,7 +2406,7 @@ class TSC_XYplot:
         if XY_flip == "True":
             X_type, Y_type = Y_type, X_type
             X_value, Y_value = Y_value, X_value
-            
+
         # Define Ksampler output image behavior
         xyplot_as_output_image = ksampler_output_image == "Plot"
 
@@ -2605,9 +2610,9 @@ class TSC_XYplot_VAE:
     modes = ["VAE Names", "VAE Batch"]
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
 
-        vaes = ["None", "Baked VAE"] + folder_paths.get_filename_list("vae")
+        vaes = ["None", "Baked VAE"] + folder_paths.get_filename_list(context, "vae")
 
         inputs = {
             "required": {
@@ -2791,9 +2796,9 @@ class TSC_XYplot_ClipSkip:
 class TSC_XYplot_Checkpoint:
     modes = ["Ckpt Names", "Ckpt Names+ClipSkip", "Ckpt Names+ClipSkip+VAE", "Checkpoint Batch"]
     @classmethod
-    def INPUT_TYPES(cls):
-        checkpoints = ["None"] + folder_paths.get_filename_list("checkpoints")
-        vaes = ["Baked VAE"] + folder_paths.get_filename_list("vae")
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        checkpoints = ["None"] + folder_paths.get_filename_list(context, "checkpoints")
+        vaes = ["Baked VAE"] + folder_paths.get_filename_list(context, "vae")
 
         inputs = {
             "required": {
@@ -2920,8 +2925,8 @@ class TSC_XYplot_LoRA:
     modes = ["LoRA Names", "LoRA Names+Weights", "LoRA Batch"]
 
     @classmethod
-    def INPUT_TYPES(cls):
-        loras = ["None"] + folder_paths.get_filename_list("loras")
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        loras = ["None"] + folder_paths.get_filename_list(context, "loras")
 
         inputs = {
             "required": {
@@ -2998,8 +3003,8 @@ class TSC_XYplot_LoRA_Plot:
             ]
 
     @classmethod
-    def INPUT_TYPES(cls):
-        loras = ["None"] + folder_paths.get_filename_list("loras")
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
+        loras = ["None"] + folder_paths.get_filename_list(context, "loras")
         return {"required": {
                 "input_mode": (cls.modes,),
                 "lora_name": (loras,),
@@ -3470,12 +3475,12 @@ class TSC_XYplot_Manual_XY_Entry_Info:
                "LoRA(3)         lora_1,model_str_1,clip_str_1;..."
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
         samplers = ";\n".join(comfy.samplers.KSampler.SAMPLERS)
         schedulers = ";\n".join(comfy.samplers.KSampler.SCHEDULERS)
-        vaes = ";\n".join(folder_paths.get_filename_list("vae"))
-        ckpts = ";\n".join(folder_paths.get_filename_list("checkpoints"))
-        loras = ";\n".join(folder_paths.get_filename_list("loras"))
+        vaes = ";\n".join(folder_paths.get_filename_list(context, "vae"))
+        ckpts = ";\n".join(folder_paths.get_filename_list(context, "checkpoints"))
+        loras = ";\n".join(folder_paths.get_filename_list(context, "loras"))
         return {"required": {
             "notes": ("STRING", {"default":
                                     f"_____________SYNTAX_____________\n{cls.syntax}\n\n"
@@ -3499,7 +3504,9 @@ class TSC_XYplot_Manual_XY_Entry:
     def INPUT_TYPES(cls):
         return {"required": {
             "plot_type": (cls.plot_types,),
-            "plot_value": ("STRING", {"default": "", "multiline": True}),}
+            "plot_value": ("STRING", {"default": "", "multiline": True}),
+        },
+        "hidden": {"context": "EXECUTION_CONTEXT"},
         }
 
     RETURN_TYPES = ("XY",)
@@ -3507,7 +3514,7 @@ class TSC_XYplot_Manual_XY_Entry:
     FUNCTION = "xy_value"
     CATEGORY = "Efficiency Nodes/XY Inputs"
 
-    def xy_value(self, plot_type, plot_value):
+    def xy_value(self, plot_type, plot_value, context: execution_context.ExecutionContext):
 
         # Store X values as arrays
         if plot_type not in {"Positive Prompt S/R", "Negative Prompt S/R", "VAE", "Checkpoint", "LoRA"}:
@@ -3526,10 +3533,10 @@ class TSC_XYplot_Manual_XY_Entry:
             "Sampler": {"options": comfy.samplers.KSampler.SAMPLERS},
             "Scheduler": {"options": comfy.samplers.KSampler.SCHEDULERS},
             "Denoise": {"min": 0, "max": 1},
-            "VAE": {"options": folder_paths.get_filename_list("vae")},
-            "Checkpoint": {"options": folder_paths.get_filename_list("checkpoints")},
+            "VAE": {"options": folder_paths.get_filename_list(context, "vae")},
+            "Checkpoint": {"options": folder_paths.get_filename_list(context, "checkpoints")},
             "Clip Skip": {"min": -24, "max": -1},
-            "LoRA": {"options": folder_paths.get_filename_list("loras"),
+            "LoRA": {"options": folder_paths.get_filename_list(context, "loras"),
                      "model_str": {"min": -10, "max": 10},"clip_str": {"min": -10, "max": 10},},
         }
 
@@ -3914,7 +3921,7 @@ class TSC_ImageOverlay:
             samples = overlay_image.movedim(-1, 1)
             overlay_image = comfy.utils.common_upscale(samples, overlay_image_size[0], overlay_image_size[1], resize_method, False)
             overlay_image = overlay_image.movedim(1, -1)
-            
+
         overlay_image = tensor2pil(overlay_image)
 
          # Add Alpha channel to overlay
@@ -4025,15 +4032,14 @@ class TSC_HighRes_Fix:
          ttl_nn_latent_upscaler.NNLatentUpscale.INPUT_TYPES()["required"]["version"][0]]
 
     latent_upscalers = default_latent_upscalers + city96_upscale_methods + ttl_nn_upscale_methods
-    pixel_upscalers = folder_paths.get_filename_list("upscale_models")
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
 
         return {"required": {"upscale_type": (["latent","pixel","both"],),
-                             "hires_ckpt_name": (["(use same)"] + folder_paths.get_filename_list("checkpoints"),),
+                             "hires_ckpt_name": (["(use same)"] + folder_paths.get_filename_list(context, "checkpoints"),),
                              "latent_upscaler": (cls.latent_upscalers,),
-                             "pixel_upscaler": (cls.pixel_upscalers,),
+                             "pixel_upscaler": (folder_paths.get_filename_list(context, "upscale_models"),),
                              "upscale_by": ("FLOAT", {"default": 1.25, "min": 0.01, "max": 8.0, "step": 0.05}),
                              "use_same_seed": ("BOOLEAN", {"default": True}),
                              "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
@@ -4041,13 +4047,13 @@ class TSC_HighRes_Fix:
                              "denoise": ("FLOAT", {"default": .56, "min": 0.00, "max": 1.00, "step": 0.01}),
                              "iterations": ("INT", {"default": 1, "min": 0, "max": 5, "step": 1}),
                              "use_controlnet": use_controlnet_widget,
-                             "control_net_name": (folder_paths.get_filename_list("controlnet"),),
+                             "control_net_name": (folder_paths.get_filename_list(context, "controlnet"),),
                              "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                              "preprocessor": preprocessor_widget,
                              "preprocessor_imgs": ("BOOLEAN", {"default": False})
                              },
                 "optional": {"script": ("SCRIPT",)},
-                "hidden": {"my_unique_id": "UNIQUE_ID"}
+                "hidden": {"my_unique_id": "UNIQUE_ID", "context": "EXECUTION_CONTEXT"}
                 }
 
     RETURN_TYPES = ("SCRIPT",)
@@ -4056,7 +4062,8 @@ class TSC_HighRes_Fix:
 
     def hires_fix_script(self, upscale_type, hires_ckpt_name, latent_upscaler, pixel_upscaler, upscale_by,
                          use_same_seed, seed, hires_steps, denoise, iterations, use_controlnet, control_net_name,
-                         strength, preprocessor, preprocessor_imgs, script=None, my_unique_id=None):
+                         strength, preprocessor, preprocessor_imgs, script=None, my_unique_id=None,
+                         context: execution_context.ExecutionContext = None):
         latent_upscale_function = None
         latent_upscale_model = None
         pixel_upscale_model = None
@@ -4125,7 +4132,7 @@ class TSC_HighRes_Fix:
                     clear_cache(my_unique_id, 0, "ckpt")
                 else:
                     latent_upscale_model, _, _ = \
-                        load_checkpoint(hires_ckpt_name, my_unique_id, output_vae=False, cache=1, cache_overwrite=True)
+                        load_checkpoint(context, hires_ckpt_name, my_unique_id, output_vae=False, cache=1, cache_overwrite=True)
 
             elif upscale_type == "pixel":
                 pixel_upscale_model = UpscaleModelLoader().load_model(pixel_upscaler)[0]
@@ -4139,7 +4146,7 @@ class TSC_HighRes_Fix:
                     clear_cache(my_unique_id, 0, "ckpt")
                 else:
                     latent_upscale_model, _, _ = \
-                        load_checkpoint(hires_ckpt_name, my_unique_id, output_vae=False, cache=1, cache_overwrite=True)
+                        load_checkpoint(context, hires_ckpt_name, my_unique_id, output_vae=False, cache=1, cache_overwrite=True)
 
         control_net = ControlNetLoader().load_controlnet(control_net_name)[0] if use_controlnet is True else None
 
@@ -4155,9 +4162,9 @@ class TSC_HighRes_Fix:
 # TSC Tiled Upscaler (https://github.com/BlenderNeko/ComfyUI_TiledKSampler)
 class TSC_Tiled_Upscaler:
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls, context: execution_context.ExecutionContext):
         # Split the list based on the keyword "tile"
-        cnet_filenames = [name for name in folder_paths.get_filename_list("controlnet")]
+        cnet_filenames = [name for name in folder_paths.get_filename_list(context, "controlnet")]
 
         return {"required": {"upscale_by": ("FLOAT", {"default": 1.25, "min": 0.01, "max": 8.0, "step": 0.05}),
                              "tile_size": ("INT", {"default": 512, "min": 256, "max": MAX_RESOLUTION, "step": 64}),
