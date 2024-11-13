@@ -132,6 +132,29 @@ class TSC_EfficientLoader:
     FUNCTION = "efficientloader"
     CATEGORY = "Efficiency Nodes/Loaders"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, ckpt_name, vae_name, clip_skip, lora_name, lora_model_strength, lora_clip_strength,
+                        positive, negative, token_normalization, weight_interpretation, empty_latent_width,
+                        empty_latent_height, batch_size, lora_stack=None, cnet_stack=None, refiner_name="None",
+                        ascore=None, prompt=None, my_unique_id=None, context: execution_context.ExecutionContext = None, loader_type="regular"):
+        if lora_name != "None" or lora_stack:
+            lora_params = []
+
+            # Check if lora_name is not the string "None" and if so, add its parameters.
+            if lora_name != "None":
+                lora_params.append((lora_name, lora_model_strength, lora_clip_strength))
+
+            # If lora_stack is not None or an empty list, extend lora_params with its items.
+            if lora_stack:
+                lora_params.extend(lora_stack)
+            for name, model_strength, clip_strength in lora_params:
+                context.validate_model("loras", name)
+
+        context.validate_model("checkpoints", ckpt_name)
+        if refiner_name != "None":
+            context.validate_model("checkpoints", refiner_name)
+        return True
+
     def efficientloader(self, ckpt_name, vae_name, clip_skip, lora_name, lora_model_strength, lora_clip_strength,
                         positive, negative, token_normalization, weight_interpretation, empty_latent_width,
                         empty_latent_height, batch_size, lora_stack=None, cnet_stack=None, refiner_name="None",
@@ -322,12 +345,25 @@ class TSC_LoRA_Stacker:
         inputs["optional"] = {
             "lora_stack": ("LORA_STACK",)
         }
+        inputs["hidden"] = {
+            "context": "EXECUTION_CONTEXT"
+        }
         return inputs
 
     RETURN_TYPES = ("LORA_STACK",)
     RETURN_NAMES = ("LORA_STACK",)
     FUNCTION = "lora_stacker"
     CATEGORY = "Efficiency Nodes/Stackers"
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, input_mode, lora_count, lora_stack=None, **kwargs):
+        context = kwargs.get("context")
+        loras = [kwargs.get(f"lora_name_{i}") for i in range(1, lora_count + 1)]
+        for lora_name in loras:
+            if not lora_name or lora_name == "None":
+                continue
+            context.validate_model("loras", lora_name)
+        return True
 
     def lora_stacker(self, input_mode, lora_count, lora_stack=None, **kwargs):
 
@@ -561,12 +597,12 @@ class TSC_KSampler:
                 # Sample the latent_image(s) using the Comfy KSampler nodes
                 elif sampler_type == "regular":
                     samples = KSampler().sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative,
-                                                        latent_image, denoise=denoise)[0] if denoise>0 else latent_image
+                                                        latent_image, denoise=denoise, context=context)[0] if denoise>0 else latent_image
 
                 elif sampler_type == "advanced":
                     samples = KSamplerAdvanced().sample(model, add_noise, seed, steps, cfg, sampler_name, scheduler,
                                                         positive, negative, latent_image, start_at_step, end_at_step,
-                                                        return_with_leftover_noise, denoise=1.0)[0]
+                                                        return_with_leftover_noise, denoise=1.0, context=context)[0]
 
                 elif sampler_type == "sdxl":
                     # Disable refiner if refine_at_step is -1
@@ -629,7 +665,7 @@ class TSC_KSampler:
                         for _ in range(iterations):
                             upscaled_latent_image = latent_upscale_function().upscale(samples, latent_upscaler, upscale_by)[0]
                             samples = KSampler().sample(latent_upscale_model, hires_seed, hires_steps, cfg, sampler_name, scheduler,
-                                                            positive, negative, upscaled_latent_image, denoise=hires_denoise)[0]
+                                                            positive, negative, upscaled_latent_image, denoise=hires_denoise, context=context)[0]
                             images = None # set to None when samples is updated
                     elif upscale_type == "pixel":
                         if images is None:
@@ -648,7 +684,8 @@ class TSC_KSampler:
                             samples = vae_encode_image(vae, images, vae_decode)
                             upscaled_latent_image = latent_upscale_function().upscale(samples, latent_upscaler, 1)[0]
                             samples = KSampler().sample(latent_upscale_model, hires_seed, hires_steps, cfg, sampler_name, scheduler,
-                                                                positive, negative, upscaled_latent_image, denoise=hires_denoise)[0]
+                                                                positive, negative, upscaled_latent_image, denoise=hires_denoise,
+                                                                context=context)[0]
                             images = None # set to None when samples is updated
 
                 # ------------------------------------------------------------------------------------------------------
@@ -4112,6 +4149,21 @@ class TSC_HighRes_Fix:
     RETURN_TYPES = ("SCRIPT",)
     FUNCTION = "hires_fix_script"
     CATEGORY = "Efficiency Nodes/Scripts"
+
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, upscale_type, hires_ckpt_name, latent_upscaler, pixel_upscaler, upscale_by,
+                         use_same_seed, seed, hires_steps, denoise, iterations, use_controlnet, control_net_name,
+                         strength, preprocessor, preprocessor_imgs, script=None, my_unique_id=None,
+                         context: execution_context.ExecutionContext = None):
+        if iterations > 0 and upscale_by > 0:
+            if upscale_type == "latent" or upscale_type == "both":
+                if hires_ckpt_name == "(use same)":
+                    pass
+                else:
+                    context.validate_model("checkpoints", hires_ckpt_name)
+
+        return True
 
     def hires_fix_script(self, upscale_type, hires_ckpt_name, latent_upscaler, pixel_upscaler, upscale_by,
                          use_same_seed, seed, hires_steps, denoise, iterations, use_controlnet, control_net_name,
