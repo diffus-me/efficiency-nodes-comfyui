@@ -411,7 +411,8 @@ class TSC_Control_Net_Stacker:
         cnet_stack = [] if cnet_stack is None else cnet_stack
 
         # Extend the control_net_stack with the new tuple
-        cnet_stack.extend([(control_net, image, strength, start_percent, end_percent)])
+        if strength > 0:
+            cnet_stack.extend([(control_net, image, strength, start_percent, end_percent)])
 
         return (cnet_stack,)
 
@@ -754,7 +755,7 @@ class TSC_KSampler:
                 elif preview_method == "none" or (preview_method == "vae_decoded_only" and vae_decode == "false"):
                     preview = {"images": list()}
                 elif images is not None:
-                    preview = PreviewImage().save_images(images, prompt=prompt, extra_pnginfo=extra_pnginfo, user_hash=user_hash)["ui"]
+                    preview = PreviewImage().save_images(images, prompt=prompt, extra_pnginfo=extra_pnginfo, context=context)["ui"]
 
                 # Define a dummy output image
                 if images is None and vae_decode == "false":
